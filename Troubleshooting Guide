@@ -1,0 +1,144 @@
+# 🔧 Troubleshooting Guide
+
+Common issues you might run into and how to fix them.
+
+---
+
+## ❌ PCs can't ping their default gateway
+
+**Symptom:** `ping 10.10.10.1` fails from Admin-PC
+
+**Checklist:**
+- [ ] Is the PC's IP and gateway set correctly? (Desktop → IP Configuration)
+- [ ] Is the access switch port in the correct VLAN?
+  ```
+  show vlan brief
+  ```
+- [ ] Is the SVI (VLAN interface) on the Core Switch up?
+  ```
+  show interface vlan 10
+  ```
+  Look for `Line protocol is up`. If it says `down`, make sure at least one access port in that VLAN is active and connected.
+
+---
+
+## ❌ Inter-VLAN routing not working (can't ping other VLANs)
+
+**Symptom:** User-PC-1 can't ping Web-Server (different VLAN)
+
+**Checklist:**
+- [ ] Is `ip routing` enabled on the Core Switch?
+  ```
+  show running-config | include ip routing
+  ```
+  If missing, run: `ip routing`
+
+- [ ] Do all SVIs have the correct IP and are they `no shutdown`?
+  ```
+  show ip interface brief
+  ```
+
+- [ ] Is the trunk link between the Core Switch and access switch carrying the right VLANs?
+  ```
+  show interfaces trunk
+  ```
+  The "VLANs allowed and active" column should list your VLANs (10, 20, 30).
+
+---
+
+## ❌ ACL is blocking traffic it shouldn't
+
+**Symptom:** Users can't reach the web server even on port 80
+
+**Check the ACL hit counters:**
+```
+show ip access-lists USERS-TO-SERVERS
+```
+Look at the match counts to see which line is being hit.
+
+**Common mistakes:**
+- ACL is applied on the wrong interface or direction (`in` vs `out`)
+- The `permit` statement for port 80 has a typo (use `eq 80` not `eq www` in older IOS)
+- There's a `deny` before the `permit` — ACLs are read top to bottom, first match wins
+
+**Fix:** Remove and re-apply the ACL in the correct order:
+```
+no ip access-list extended USERS-TO-SERVERS
+
+ip access-list extended USERS-TO-SERVERS
+ permit tcp 10.10.20.0 0.0.0.255 10.10.30.0 0.0.0.255 eq 80
+ permit tcp 10.10.20.0 0.0.0.255 10.10.30.0 0.0.0.255 eq 443
+ deny   ip 10.10.20.0 0.0.0.255 10.10.30.0 0.0.0.255
+ permit ip any any
+```
+
+---
+
+## ❌ Trunk ports not passing VLAN traffic
+
+**Symptom:** VLANs exist but no traffic crosses between switches
+
+**Check trunk status:**
+```
+show interfaces GigabitEthernet0/1 trunk
+```
+
+**Common fixes:**
+- Make sure both ends of the link are set to `switchport mode trunk`
+- On Layer 3 switches, you may need `switchport trunk encapsulation dot1q` before setting trunk mode
+- Confirm the VLAN is in the allowed list: `switchport trunk allowed vlan add 20`
+
+---
+
+## ❌ NAT not working (internal users can't reach internet)
+
+**Symptom:** Pings to 203.0.113.1 fail from internal PCs
+
+**Checklist:**
+- [ ] Is the NAT ACL permitting the right subnets?
+  ```
+  show ip nat translations
+  show access-lists 1
+  ```
+- [ ] Are `ip nat inside` and `ip nat outside` applied to the correct interfaces?
+  ```
+  show ip interface FastEthernet0/0
+  show ip interface FastEthernet0/1
+  ```
+- [ ] Does the firewall have a default route?
+  ```
+  show ip route
+  ```
+  Should see `S* 0.0.0.0/0 via 203.0.113.1`
+
+---
+
+## ❌ "Invalid input detected" error when entering commands
+
+**Cause:** You're likely not in the right configuration mode.
+
+| Mode              | Prompt looks like        | How to get there          |
+|-------------------|--------------------------|---------------------------|
+| User EXEC         | `Switch>`                | Default on login          |
+| Privileged EXEC   | `Switch#`                | Type `enable`             |
+| Global Config     | `Switch(config)#`        | Type `configure terminal` |
+| Interface Config  | `Switch(config-if)#`     | Type `interface vlan 10`  |
+| VLAN Config       | `Switch(config-vlan)#`   | Type `vlan 10`            |
+
+---
+
+## 🛠️ Useful Verification Commands (Quick Reference)
+
+```bash
+show vlan brief                        # List all VLANs
+show interfaces trunk                  # Show trunk port status
+show ip interface brief               # Show all interfaces + status
+show ip route                         # Show routing table
+show ip access-lists                  # Show ACLs and hit counts
+show ip nat translations              # Show NAT table
+show running-config                   # Show full current config
+show running-config | section vlan    # Filter config for VLAN section
+show cdp neighbors                    # Show connected Cisco devices
+ping 10.10.20.10                      # Test connectivity
+traceroute 10.10.30.10               # Trace path to destination
+```
